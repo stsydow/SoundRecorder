@@ -37,11 +37,13 @@
     <string name="pause_recording_button">Pause</string>
     <string name="resume_recording_button">Resume</string>
     <string name="default_file_name">recording</string>
+    <string name="file_name_pattern">recording</string>
     <string name="record_prompt">Tap the button to start recording</string>
     <string name="record_in_progress">Recording</string>
     <string name="full_date_pattern">mmm dd yyyy - hh:mm a</string>
     <string name="file_name">filename</string>
     <string name="hour_minute_default">00:00</string>
     <string name="recording_item">recording item</string>
+    <string name="storage_dir">SoundRecorder</string>
 
 </resources>

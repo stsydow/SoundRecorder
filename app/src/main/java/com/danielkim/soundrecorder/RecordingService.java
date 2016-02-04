@@ -3,13 +3,16 @@ package com.danielkim.soundrecorder;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Environment;
 import android.os.IBinder;
 import android.os.SystemClock;
+import android.provider.MediaStore;
 import android.support.v4.app.NotificationCompat;
 import android.util.Log;
 import android.widget.Toast;
@@ -19,6 +22,7 @@ import com.danielkim.soundrecorder.activities.MainActivity;
 import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -35,12 +39,13 @@ public class RecordingService extends Service {
     private String mFilePath = null;
 
     private MediaRecorder mRecorder = null;
-    private DBHelper mDatabase;
     private NotificationCompat.Builder mNotificationBuilder;
     private NotificationManager notifyManager = null;
     private Timer mTimer = null;
     private TimerTask mIncrementTimerTask = null;
     private OnTimerChangedListener onTimerChangedListener = null;
+
+    private LinkedHashSet<Intent> mIntends;
 
 
     private long mStartingTimeMillis = -1;
@@ -48,11 +53,14 @@ public class RecordingService extends Service {
 
     @Override
     public IBinder onBind(Intent intent) {
+        mIntends.add(intent);
         return myBinder;
     }
 
     @Override
     public boolean onUnbind(Intent intent) {
+        if (mIntends.contains(intent))
+            mIntends.remove(intent);
         return false;
     }
 
@@ -69,8 +77,7 @@ public class RecordingService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        mRecorder = new MediaRecorder();
-        mDatabase = new DBHelper(getApplicationContext());
+        mIntends = new LinkedHashSet<>();
         notifyManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         mNotificationBuilder = new NotificationCompat.Builder(getApplicationContext());
         mNotificationBuilder.setSmallIcon(R.drawable.ic_mic_white_36dp);
@@ -110,7 +117,7 @@ public class RecordingService extends Service {
         mRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
         mRecorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
         mRecorder.setOutputFile(mFilePath);
-        mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+        mRecorder.setAudioEncoder(MediaRecorder.AudioEncoder.HE_AAC);
         mRecorder.setAudioChannels(1);
         mRecorder.setAudioEncodingBitRate(96000);
         mRecorder.setAudioSamplingRate(44100);
@@ -136,10 +143,9 @@ public class RecordingService extends Service {
 
         do{
             count++;
-            mFileName = getString(R.string.default_file_name)
-                    + "-" + (mDatabase.getCount() + count) + ".mp4";
+            mFileName = getString(R.string.default_file_name) + "-" + count + ".mp4";
             mFilePath = Environment.getExternalStorageDirectory().getAbsolutePath();
-            mFilePath += "/SoundRecorder/" + mFileName;
+            mFilePath += "/" + getString(R.string.storage_dir) + "/" + mFileName;
 
             f = new File(mFilePath);
         }while (f.exists() && !f.isDirectory());
@@ -150,26 +156,44 @@ public class RecordingService extends Service {
             Log.e(LOG_TAG, "stop recording while not started");
             return;
         }
-        mRecorder.stop();
-        mRecorder.reset();
-        long mElapsedMillis = getRecordTime();
-        mRecorder.release();
-        mRecorder = null;
-        mRecording = false;
 
         if (mIncrementTimerTask != null) {
             mIncrementTimerTask.cancel();
             mTimer.purge();
             mIncrementTimerTask = null;
         }
-        Toast.makeText(this, getString(R.string.toast_recording_finish) + " " + mFilePath, Toast.LENGTH_LONG).show();
 
-        try {
-            mDatabase.addRecording(mFileName, mFilePath, mElapsedMillis);
-        } catch (Exception e){
-            Log.e(LOG_TAG, "exception", e);
+        if (mRecorder != null) {
+            mRecorder.stop();
+            mRecorder.reset();
+            long mElapsedMillis = getRecordTime();
+            mRecorder.release();
+            mRecorder = null;
+            Toast.makeText(this, getString(R.string.toast_recording_finish) + " " + mFilePath, Toast.LENGTH_LONG).show();
+
+            String mimeType = "audio/mp4";
+
+            File outFile = new File(mFilePath);
+            long fileSize = outFile.length();
+
+            ContentValues values = new ContentValues(12);
+            values.put(MediaStore.MediaColumns.DATA, mFilePath);
+            values.put(MediaStore.MediaColumns.TITLE, mFileName);
+            values.put(MediaStore.MediaColumns.SIZE, fileSize);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+            values.put(MediaStore.MediaColumns.DATE_ADDED, System.currentTimeMillis() / 1000);
+            values.put(MediaStore.Audio.Media.ARTIST, getString(R.string.app_name));
+            values.put(MediaStore.Audio.Media.DURATION, mElapsedMillis);
+            values.put(MediaStore.Audio.Media.IS_PODCAST, true);
+
+            Uri uri = MediaStore.Audio.Media.getContentUriForPath(mFilePath);
+            getContentResolver().insert(uri, values);
+
+        } else {
+            Log.e(LOG_TAG, "MediaRecorder not initialized");
         }
 
+        mRecording = false;
         stopForeground(true);
     }
 
